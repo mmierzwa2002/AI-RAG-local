@@ -1,0 +1,10 @@
+# srodowisko wirtualne
+venv/
+.venv/
+
+# dane (wgrane pliki + baza wektorowa) — nie commitujemy
+data/
+
+# cache Pythona
+__pycache__/
+*.pyc

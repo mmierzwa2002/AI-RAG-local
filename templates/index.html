@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG lokalny</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◆</span>
+      <span class="brand-name">rag<span class="brand-dot">.</span>lokalny</span>
+    </div>
+    <div class="status" id="status" title="Stan serwera Ollama">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">sprawdzanie…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEWA KOLUMNA: baza wiedzy -->
+    <aside class="sidebar">
+      <section class="panel">
+        <h2 class="panel-title">Baza wiedzy</h2>
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".txt,.md,.markdown,.pdf" hidden>
+          <div class="dropzone-inner">
+            <span class="dropzone-icon">⤓</span>
+            <p class="dropzone-text">Upusc plik tutaj<br>lub <button type="button" class="link" id="browseBtn">wybierz z dysku</button></p>
+            <p class="dropzone-hint">txt · md · pdf</p>
+          </div>
+        </div>
+        <div class="upload-status" id="uploadStatus" hidden></div>
+      </section>
+
+      <section class="panel panel-grow">
+        <div class="panel-head">
+          <h2 class="panel-title">Dokumenty</h2>
+          <span class="chip" id="chunkCount">0 frag.</span>
+        </div>
+        <ul class="doc-list" id="docList"></ul>
+      </section>
+    </aside>
+
+    <!-- PRAWA KOLUMNA: pytania i odpowiedzi -->
+    <section class="main">
+      <div class="controls">
+        <div class="control">
+          <span class="control-label">model jezykowy</span>
+          <div class="select-wrap">
+            <select id="modelSelect" class="select"></select>
+            <button type="button" class="icon-btn" id="refreshModels" title="Odswiez liste modeli z Ollamy">↻</button>
+          </div>
+        </div>
+        <div class="control control-narrow">
+          <span class="control-label">fragmenty (k)</span>
+          <input type="number" id="topK" class="num-input" min="1" max="10" value="4">
+        </div>
+      </div>
+
+      <form class="ask" id="askForm">
+        <input type="text" id="question" class="ask-input"
+               placeholder="Zadaj pytanie do swoich dokumentow…" autocomplete="off">
+        <button type="submit" class="ask-btn" id="askBtn">Zapytaj</button>
+      </form>
+
+      <div class="answer-area" id="answerArea">
+        <div class="empty-state" id="emptyState">
+          <p class="empty-title">Twoja prywatna baza wiedzy</p>
+          <p class="empty-sub">Dodaj dokumenty, wybierz model i zadaj pytanie. Odpowiedz powstaje wylacznie
+            z Twoich plikow — nic nie opuszcza tego komputera.</p>
+        </div>
+      </div>
+
+      <div class="sources" id="sources" hidden>
+        <h3 class="sources-title">Zrodla <span class="sources-sub">— fragmenty, na ktorych oparl sie model</span></h3>
+        <div class="source-cards" id="sourceCards"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
