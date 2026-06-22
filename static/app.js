@@ -1,7 +1,3 @@
-/* =========================================================================
-   RAG lokalny — logika frontendu (czysty JavaScript, bez bibliotek)
-   ========================================================================= */
-
 const $ = (id) => document.getElementById(id);
 
 // --- elementy DOM ---
@@ -23,9 +19,7 @@ const answerArea  = $("answerArea");
 const sources     = $("sources");
 const sourceCards = $("sourceCards");
 
-// =========================================================================
 // Inicjalizacja
-// =========================================================================
 document.addEventListener("DOMContentLoaded", () => {
   refreshStatus();
   loadModels();
@@ -34,9 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(refreshStatus, 15000);
 });
 
-// =========================================================================
 // Stan serwera Ollama
-// =========================================================================
 async function refreshStatus() {
   try {
     const r = await fetch("/api/status");
@@ -55,9 +47,7 @@ async function refreshStatus() {
   }
 }
 
-// =========================================================================
 // Lista modeli (wybor w interfejsie)
-// =========================================================================
 async function loadModels() {
   refreshBtn.classList.add("spinning");
   try {
@@ -93,9 +83,7 @@ async function loadModels() {
 
 refreshBtn.addEventListener("click", loadModels);
 
-// =========================================================================
 // Lista dokumentow w bazie
-// =========================================================================
 async function loadDocuments() {
   try {
     const r = await fetch("/api/documents");
@@ -138,9 +126,7 @@ async function deleteDocument(name) {
   refreshStatus();
 }
 
-// =========================================================================
 // Wgrywanie dokumentow (klik + drag & drop)
-// =========================================================================
 browseBtn.addEventListener("click", () => fileInput.click());
 dropzone.addEventListener("click", (e) => {
   if (e.target === browseBtn) return; // przycisk obsluguje sie sam
@@ -196,9 +182,7 @@ function showUpload(type, msg, withSpinner = false) {
   }
 }
 
-// =========================================================================
-// Zadawanie pytan (retrieval + generacja)
-// =========================================================================
+// Zadawanie pytan
 askForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const q = question.value.trim();
@@ -245,11 +229,88 @@ function showThinking() {
 
 function showAnswer(d) {
   answerArea.innerHTML = `
-    <div class="answer-text">${escapeHtml(d.answer)}</div>
+    <div class="answer-text">${renderMarkdown(d.answer)}</div>
     <div class="answer-meta">
       <span>model: ${escapeHtml(d.model)}</span>
       <span>zrodel: ${d.sources.length}</span>
     </div>`;
+}
+
+// Model czesto formatuje odpowiedzi markdownem (**pogrubienia**, listy, naglowki).
+// Zamieniamy najczestsze konstrukcje na HTML — bez zewnetrznych bibliotek, bo
+// aplikacja dziala w pelni lokalnie. Bezpieczenstwo: cala tresc najpierw
+// escapujemy (odpowiedz pochodzi z modelu czytajacego pliki uzytkownika),
+// formatowanie nakladamy dopiero na zescapowany tekst.
+function renderMarkdown(src) {
+  const esc = (s) =>
+    s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  // bloki kodu ``` ... ``` odkladamy na bok, zeby nie ruszylo ich formatowanie
+  const blocks = [];
+  src = String(src ?? "").replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, code) => {
+    blocks.push(code.replace(/\n$/, ""));
+    return `@@CB${blocks.length - 1}@@`;
+  });
+
+  const inline = (t) =>
+    esc(t)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  const out = [];
+  let list = null;          // "ul" | "ol" | null
+  let para = [];
+  const flushPara = () => {
+    if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; }
+  };
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+
+  for (const raw of src.split("\n")) {
+    const line = raw.trim();
+
+    if (!line) { flushPara(); closeList(); continue; }
+
+    const code = line.match(/^@@CB(\d+)@@$/);
+    if (code) {
+      flushPara(); closeList();
+      out.push(`<pre><code>${esc(blocks[+code[1]])}</code></pre>`);
+      continue;
+    }
+
+    const h = line.match(/^(#{1,4})\s+(.+)$/);
+    if (h) {
+      flushPara(); closeList();
+      const lvl = Math.min(6, h[1].length + 2);
+      out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`);
+      continue;
+    }
+
+    const ul = line.match(/^[-*+]\s+(.+)$/);
+    if (ul) {
+      flushPara();
+      if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
+      out.push(`<li>${inline(ul[1])}</li>`);
+      continue;
+    }
+
+    const ol = line.match(/^\d+[.)]\s+(.+)$/);
+    if (ol) {
+      flushPara();
+      if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
+      out.push(`<li>${inline(ol[1])}</li>`);
+      continue;
+    }
+
+    closeList();
+    para.push(line);
+  }
+  flushPara();
+  closeList();
+  return out.join("\n");
 }
 
 function showError(msg) {
@@ -264,6 +325,8 @@ function renderSources(items) {
     return;
   }
   sourceCards.innerHTML = "";
+  sources.hidden = false; // odslaniamy PRZED pomiarem wysokosci, inaczej wymiary = 0
+
   items.forEach((s, i) => {
     const pct = Math.max(0, Math.min(100, Math.round(s.score * 100)));
     const card = document.createElement("div");
@@ -277,15 +340,29 @@ function renderSources(items) {
         <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
         <span class="score-label">trafnosc ${pct}%</span>
       </div>
-      <div class="source-text">${escapeHtml(s.text)}</div>`;
+      <div class="source-text">${escapeHtml(s.text)}</div>
+      <div class="source-toggle">rozwiń ▾</div>`;
     sourceCards.appendChild(card);
+
+    const textEl = card.querySelector(".source-text");
+    const toggleEl = card.querySelector(".source-toggle");
+
+    // najpierw nakladamy limit wysokosci, potem mierzymy czy tekst sie miesci
+    card.classList.add("is-truncated");
+    if (textEl.scrollHeight > textEl.clientHeight + 2) {
+      // fragment faktycznie przyciety -> rozwijalny po kliknieciu
+      card.addEventListener("click", () => {
+        const expanded = card.classList.toggle("expanded");
+        toggleEl.textContent = expanded ? "zwiń ▴" : "rozwiń ▾";
+      });
+    } else {
+      // miesci sie w calosci -> bez limitu, bez fade, bez przycisku
+      card.classList.remove("is-truncated");
+    }
   });
-  sources.hidden = false;
 }
 
-// =========================================================================
 // Pomocnicze
-// =========================================================================
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";

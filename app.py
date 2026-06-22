@@ -50,13 +50,13 @@ def status():
 
 @app.route("/api/models")
 def models():
-    """Lista modeli do wyboru w interfejsie."""
+    """Lista modeli do wyboru w interfejsie - tylko te, ktore potrafia generowac
+    tekst (modele embeddingowe jak nomic-embed-text czy bge-m3 sa pomijane)."""
     try:
         installed = engine.client.list_models()
     except Exception:
         installed = []
-    # nie pokazujemy modelu embeddingowego jako opcji do generowania
-    chat_models = [m for m in installed if config.EMBEDDING_MODEL not in m]
+    chat_models = [m for m in installed if engine.client.can_generate(m)]
     return jsonify({
         "models": chat_models,
         "default": config.DEFAULT_LLM_MODEL,

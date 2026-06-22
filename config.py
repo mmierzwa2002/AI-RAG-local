@@ -1,15 +1,14 @@
 """
+
 Konfiguracja aplikacji RAG.
-Wszystkie ustawienia w jednym miejscu - tu zmieniasz adres Ollamy, modele itd.
+
 """
 import os
 
-# --- Ollama ---
 # Adres lokalnego serwera Ollama (domyslnie po instalacji nasluchuje na 11434)
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
 # Model jezykowy (LLM) uzywany do generowania odpowiedzi.
-# To tylko WARTOSC DOMYSLNA - w interfejsie mozna wybrac dowolny zainstalowany model.
 DEFAULT_LLM_MODEL = os.environ.get("DEFAULT_LLM_MODEL", "gemma3:4b")
 
 # Model do embeddingow (zamiany tekstu na wektory).
@@ -17,13 +16,19 @@ DEFAULT_LLM_MODEL = os.environ.get("DEFAULT_LLM_MODEL", "gemma3:4b")
 # musza byc zwektoryzowane tym samym modelem, inaczej wyszukiwanie nie ma sensu.
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "nomic-embed-text")
 
+# Fallback do rozpoznawania modeli embeddingowych po nazwie - uzywany TYLKO,
+# gdy Ollama nie zwraca pola 'capabilities' (starsze wersje). Nowsze Ollamy
+# raportuja 'embedding' vs 'completion' i wtedy ta lista jest nieuzywana.
+EMBEDDING_HINTS = ("embed", "bge", "minilm", "arctic-embed", "mxbai")
+
 # --- Parametry RAG ---
 CHUNK_SIZE = 900      # maksymalny rozmiar fragmentu (w znakach)
 CHUNK_OVERLAP = 150   # zachodzenie fragmentow na siebie (kontekst na stykach)
 TOP_K = 4             # ile najlepiej pasujacych fragmentow trafia do promptu
 
-# Temperatura generowania (0 = deterministycznie/konkretnie, 1 = kreatywnie)
-LLM_TEMPERATURE = 0.2
+# Temperatura generowania (0 = deterministycznie/konkretnie, 1 = kreatywnie).
+# 0 trzyma model blisko kontekstu - mniej "dopowiadania" z wiedzy wlasnej.
+LLM_TEMPERATURE = 0.0
 
 # --- Pliki ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

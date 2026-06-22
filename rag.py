@@ -11,6 +11,7 @@ Sklada sie z czterech elementow:
 import os
 import re
 import json
+import unicodedata
 import requests
 import numpy as np
 
@@ -40,6 +41,25 @@ class OllamaClient:
         r.raise_for_status()
         data = r.json()
         return [m["name"] for m in data.get("models", [])]
+
+    def can_generate(self, model):
+        """Czy model nadaje sie do generowania tekstu (a nie tylko do embeddingow)?
+
+        Pytamy Ollame przez /api/show o 'capabilities': modele embeddingowe
+        (np. nomic-embed-text, bge-m3) maja tylko 'embedding', a czatowe maja
+        'completion'. Gdy starsza Ollama nie zwraca tego pola, wracamy do
+        heurystyki po nazwie (config.EMBEDDING_HINTS).
+        """
+        try:
+            r = requests.post(f"{self.base_url}/api/show", json={"model": model}, timeout=10)
+            r.raise_for_status()
+            caps = r.json().get("capabilities") or []
+        except requests.RequestException:
+            caps = []
+        if caps:
+            return "completion" in caps
+        name = model.lower()
+        return not any(hint in name for hint in config.EMBEDDING_HINTS)
 
     def embed(self, text):
         """Zamienia tekst na wektor liczb (embedding)."""
@@ -73,6 +93,30 @@ class OllamaClient:
 # ----------------------------------------------------------------------------
 # 2. Parsowanie plikow -> czysty tekst
 # ----------------------------------------------------------------------------
+# Punktory z fontow Symbol/Wingdings PDF koduje w obszarze Private Use Area
+# (np. 0xF0B4) - bez glifu w przegladarce widac "kwadraciki". Mapujemy je na "- ".
+_BULLET_GLYPHS = {0xF0B4, 0xF0A7, 0xF0B7, 0xF0A8, 0xF0FC, 0xF0D8, 0x25AA, 0x2022}
+
+
+def _clean_pdf_text(text):
+    """Porzadkuje tekst wyciagniety z PDF, zeby byl czytelny i dobrze sie wektoryzowal:
+    - NFKC: znaki zgodnosciowe na zwykle (matematyczne litery -> ASCII, ligatury),
+    - punktory z fontow symbolicznych (Private Use Area) -> "- ",
+    - usuwa pozostale niewyswietlalne znaki z obszaru PUA.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if cp in _BULLET_GLYPHS:
+            out.append("- ")
+        elif 0xE000 <= cp <= 0xF8FF:   # Private Use Area - niewyswietlalne, pomijamy
+            continue
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def extract_text(filepath):
     """Wyciaga tekst z pliku w zaleznosci od rozszerzenia."""
     ext = os.path.splitext(filepath)[1].lower()
@@ -82,10 +126,10 @@ def extract_text(filepath):
             return f.read()
 
     if ext == ".pdf":
-        from pypdf import PdfReader
-        reader = PdfReader(filepath)
-        pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n\n".join(pages)
+        import fitz  # PyMuPDF - szybka i uniwersalna ekstrakcja tekstu z PDF
+        with fitz.open(filepath) as doc:
+            pages = [page.get_text("text") for page in doc]
+        return _clean_pdf_text("\n\n".join(pages))
 
     raise ValueError(f"Nieobslugiwany typ pliku: {ext}")
 
@@ -242,9 +286,18 @@ class VectorStore:
 # ----------------------------------------------------------------------------
 # 5. Silnik RAG (spina wszystko razem)
 # ----------------------------------------------------------------------------
-PROMPT_TEMPLATE = """Jestes asystentem, ktory odpowiada na pytania WYLACZNIE na podstawie podanego kontekstu.
-Jesli w kontekscie nie ma odpowiedzi, powiedz wprost, ze nie znajdujesz tej informacji w dokumentach.
-Odpowiadaj po polsku, rzeczowo i zwiezle.
+PROMPT_TEMPLATE = """Jestes asystentem, ktory odpowiada na pytania TYLKO i WYLACZNIE na podstawie
+fragmentow z sekcji KONTEKST. Te fragmenty sa jedynym dozwolonym zrodlem prawdy.
+
+ZASADY (przestrzegaj ich bezwzglednie):
+1. Nie korzystaj z wiedzy spoza KONTEKSTU. Nie dopowiadaj i nie zgaduj.
+2. Po kazdym stwierdzeniu podaj zrodlo w nawiasie kwadratowym, np. [Fragment 2].
+   Jesli opiera sie na kilku fragmentach, wymien je wszystkie: [Fragment 1][Fragment 3].
+3. Jesli w KONTEKSCIE nie ma odpowiedzi, napisz dokladnie:
+   "Nie znajduje tej informacji w dokumentach." i nie dodawaj nic wiecej.
+4. Jesli kontekst odpowiada tylko czesciowo, napisz co wynika z dokumentow (z cytatami)
+   i wyraznie zaznacz, czego w nich brakuje.
+5. Odpowiadaj po polsku, rzeczowo i zwiezle.
 
 === KONTEKST ===
 {context}
@@ -252,7 +305,7 @@ Odpowiadaj po polsku, rzeczowo i zwiezle.
 === PYTANIE ===
 {question}
 
-=== ODPOWIEDZ ==="""
+=== ODPOWIEDZ (z cytatami [Fragment N]) ==="""
 
 
 class RagEngine:
